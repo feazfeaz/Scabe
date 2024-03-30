@@ -66,7 +66,7 @@ app.MapGet("/scanDevices", async (ScanningService scanningService) =>
     }
     else
     {
-        return Results.NotFound("No scanning devices found.");
+        return Results.Ok(Array.Empty<object>());
     }
 })
 .WithName("GetScanDevices")
