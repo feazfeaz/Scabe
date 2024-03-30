@@ -73,7 +73,7 @@ app.MapGet("/scanDevices", async (ScanningService scanningService) =>
 .WithOpenApi();
 
 
-app.MapGet("/initiateScan", async (HttpContext httpContext, string scannerId) =>
+app.MapGet("/initiateScan",  async (HttpContext httpContext, string scannerId, string? paperSource, string? pageSize, string? dpi) =>
 {
     string targetDeviceId = "TWAIN2 FreeImage Software Scanner";
     using var scanningContext = new ScanningContext(new GdiImageContext());
@@ -89,14 +89,37 @@ app.MapGet("/initiateScan", async (HttpContext httpContext, string scannerId) =>
         return Results.NotFound($"Device with ID {targetDeviceId} not found.");
     }
 
+   // Initialize defaults
+    PaperSource parsedPaperSource = PaperSource.Flatbed;
+    PageSize parsedPageSize = PageSize.A4;
+    int parsedDpi = 300; // Default DPI
+
+    // Check and parse `paperSource`
+    if (!string.IsNullOrEmpty(paperSource) && Enum.IsDefined(typeof(PaperSource), paperSource))
+    {
+        parsedPaperSource = (PaperSource)Enum.Parse(typeof(PaperSource), paperSource, true);
+    }
+
+    // Check and parse `pageSize`
+    if (!string.IsNullOrEmpty(pageSize) && Enum.IsDefined(typeof(PageSize), pageSize))
+    {
+        parsedPageSize = (PageSize)Enum.Parse(typeof(PageSize), pageSize, true);
+    }
+
+    // Parse `dpi`
+    if (!string.IsNullOrEmpty(dpi) && int.TryParse(dpi, out int dpiValue))
+    {
+        parsedDpi = dpiValue;
+    }
+
     var options = new ScanOptions
     {
         Device = targetDevice,
-        PaperSource = PaperSource.Flatbed,
-        PageSize = PageSize.A4,
-        Dpi = 300
+        PaperSource = parsedPaperSource,
+        PageSize = parsedPageSize,
+        Dpi = parsedDpi // Default to 300 DPI if not provided
     };
-
+    Console.WriteLine($"DPI: {dpi}");
     var images = await controller.Scan(options).ToListAsync();
     if (images.Count == 0)
     {
@@ -122,8 +145,54 @@ app.MapGet("/ping", () => {
     return Results.Ok(response);
 }).WithName("Ping")
 .WithOpenApi();
-app.Run();
 
+
+app.MapGet("/scanDevicesAll", async (HttpContext httpContext, string? driverType) =>
+{
+using var scanningContext = new ScanningContext(new GdiImageContext());
+    scanningContext.SetUpWin32Worker();
+    var controller = new ScanController(scanningContext);
+
+    // Defining the functions to get devices by driver types
+    async Task<IEnumerable<ScanDevice>> GetWiaDevices() => await controller.GetDeviceList(Driver.Wia);
+    async Task<IEnumerable<ScanDevice>> GetTwainDevices() => await controller.GetDeviceList(Driver.Twain);
+    async Task<IEnumerable<ScanDevice>> GetEsclDevices() => await controller.GetDeviceList(Driver.Escl);
+
+    var allDriverTypes = new Dictionary<string, Func<Task<IEnumerable<ScanDevice>>>>()
+    {
+        {"wia", GetWiaDevices},
+        {"twain", GetTwainDevices},
+        {"escl", GetEsclDevices},
+    };
+
+    if (string.IsNullOrEmpty(driverType))
+    {
+        var groupedDeviceList = new Dictionary<string, IEnumerable<object>>();
+foreach (var pair in allDriverTypes)
+{
+    var devices = await pair.Value();
+    groupedDeviceList[pair.Key] = devices.Select(device => new { device.Name, device.ID } as object).ToList();
+}
+
+        return Results.Ok(groupedDeviceList);
+    }
+    else
+    {
+        driverType = driverType.ToLower();
+        if (allDriverTypes.TryGetValue(driverType, out var getDevices))
+        {
+            var devices = await getDevices();
+            return Results.Ok(new { DriverType = driverType, Devices = devices.Select(device => new { device.Name, device.ID }) });
+        }
+        else
+        {
+            return Results.BadRequest($"Invalid driver type specified: {driverType}");
+        }
+    }
+})
+.WithName("GetScanDevicesAll")
+.WithOpenApi();
+app.Run();
 record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
 {
     public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
@@ -142,4 +211,16 @@ public class GeneralApiResponse<T>
 public class FilePathResponse
 {
     public string FilePath { get; set; }
+}
+public static class EnumParser
+{
+    public static TEnum ParseOrDefault<TEnum>(string value, TEnum defaultValue) where TEnum : struct
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return defaultValue;
+        }
+
+        return Enum.TryParse<TEnum>(value, true, out TEnum result) ? result : defaultValue;
+    }
 }
