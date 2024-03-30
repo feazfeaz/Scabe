@@ -8,13 +8,24 @@ using NAPS2.Images;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var  MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
 // Add services to the container.
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddScoped<ScanningService>();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(name: MyAllowSpecificOrigins,
+                      policy =>
+                      {
+                          policy.WithOrigins("http://localhost:3000",
+                                              "http://www.contoso.com");
+                      });
+});
 
 var app = builder.Build();
-
+app.UseCors(MyAllowSpecificOrigins);
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -31,7 +42,7 @@ var summaries = new[]
 
 app.MapGet("/weatherforecast", () =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
+    var forecast = Enumerable.Range(1, 5).Select(index =>
         new WeatherForecast
         (
             DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
@@ -44,12 +55,10 @@ app.MapGet("/weatherforecast", () =>
 .WithName("GetWeatherForecast")
 .WithOpenApi();
 // scan
-app.MapGet("/scanDevices", async () =>
+app.MapGet("/scanDevices", async (ScanningService scanningService) =>
 {
-    using var scanningContext = new ScanningContext(new GdiImageContext());
-    var controller = new ScanController(scanningContext);
-    scanningContext.SetUpWin32Worker();
-    var devices = await controller.GetDeviceList(Driver.Twain);
+ 
+    var devices = await scanningService.GetDevicesAsync();
 
     if (devices != null && devices.Any())
     {
@@ -64,14 +73,15 @@ app.MapGet("/scanDevices", async () =>
 .WithOpenApi();
 
 
-app.MapGet("/initiateScan", async () =>
+app.MapGet("/initiateScan", async (HttpContext httpContext, string scannerId) =>
 {
-    const string targetDeviceId = "TWAIN2 FreeImage Software Scanner";
+    string targetDeviceId = "TWAIN2 FreeImage Software Scanner";
     using var scanningContext = new ScanningContext(new GdiImageContext());
     scanningContext.SetUpWin32Worker();
     var controller = new ScanController(scanningContext);
-    
+
     var devices = await controller.GetDeviceList(Driver.Twain);
+    targetDeviceId = scannerId;
     var targetDevice = devices.FirstOrDefault(d => d.ID == targetDeviceId);
 
     if (targetDevice == null)
@@ -82,7 +92,7 @@ app.MapGet("/initiateScan", async () =>
     var options = new ScanOptions
     {
         Device = targetDevice,
-        PaperSource = PaperSource.Feeder,
+        PaperSource = PaperSource.Flatbed,
         PageSize = PageSize.A4,
         Dpi = 300
     };
@@ -101,14 +111,35 @@ app.MapGet("/initiateScan", async () =>
 
     await pdfExporter.Export(pdfPath, images);
 
-    return Results.Ok($"File saved to {pdfPath}");
+    var fileData = new FilePathResponse { FilePath = pdfPath };
+var response = new GeneralApiResponse<FilePathResponse>("File saved successfully", fileData);
+return Results.Ok(response);
 })
 .WithName("InitiateScan")
 .WithOpenApi();
-
+app.MapGet("/ping", () => {
+    var response = new GeneralApiResponse<string>("pong", null);
+    return Results.Ok(response);
+}).WithName("Ping")
+.WithOpenApi();
 app.Run();
 
 record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
 {
     public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+}
+public class GeneralApiResponse<T>
+{
+    public string Message { get; set; }
+    public T Data { get; set; }
+
+    public GeneralApiResponse(string message, T data)
+    {
+        Message = message;
+        Data = data;
+    }
+}
+public class FilePathResponse
+{
+    public string FilePath { get; set; }
 }
