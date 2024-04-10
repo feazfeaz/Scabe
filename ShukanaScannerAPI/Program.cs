@@ -8,7 +8,7 @@ using NAPS2.Images;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var  MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
+var MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
 // Add services to the container.
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
@@ -20,6 +20,7 @@ builder.Services.AddCors(options =>
                       policy =>
                       {
                           policy.WithOrigins("http://localhost:3000",
+                          "https://shukana-scan-fe.vercel.app",
                                               "http://www.contoso.com");
                       });
 });
@@ -57,7 +58,7 @@ app.MapGet("/weatherforecast", () =>
 // scan
 app.MapGet("/scanDevices", async (ScanningService scanningService) =>
 {
- 
+
     var devices = await scanningService.GetDevicesAsync();
 
     if (devices != null && devices.Any())
@@ -73,7 +74,7 @@ app.MapGet("/scanDevices", async (ScanningService scanningService) =>
 .WithOpenApi();
 
 
-app.MapGet("/initiateScan",  async (HttpContext httpContext, string scannerId, string? paperSource, string? pageSize, string? dpi) =>
+app.MapGet("/initiateScan", async (HttpContext httpContext, string scannerId, string? paperSource, string? pageSize, string? dpi) =>
 {
     string targetDeviceId = "TWAIN2 FreeImage Software Scanner";
     using var scanningContext = new ScanningContext(new GdiImageContext());
@@ -89,7 +90,7 @@ app.MapGet("/initiateScan",  async (HttpContext httpContext, string scannerId, s
         return Results.NotFound($"Device with ID {targetDeviceId} not found.");
     }
 
-   // Initialize defaults
+    // Initialize defaults
     PaperSource parsedPaperSource = PaperSource.Flatbed;
     PageSize parsedPageSize = PageSize.A4;
     int parsedDpi = 300; // Default DPI
@@ -135,12 +136,13 @@ app.MapGet("/initiateScan",  async (HttpContext httpContext, string scannerId, s
     await pdfExporter.Export(pdfPath, images);
 
     var fileData = new FilePathResponse { FilePath = pdfPath };
-var response = new GeneralApiResponse<FilePathResponse>("File saved successfully", fileData);
-return Results.Ok(response);
+    var response = new GeneralApiResponse<FilePathResponse>("File saved successfully", fileData);
+    return Results.Ok(response);
 })
 .WithName("InitiateScan")
 .WithOpenApi();
-app.MapGet("/ping", () => {
+app.MapGet("/ping", () =>
+{
     var response = new GeneralApiResponse<string>("pong", null);
     return Results.Ok(response);
 }).WithName("Ping")
@@ -149,7 +151,7 @@ app.MapGet("/ping", () => {
 
 app.MapGet("/scanDevicesAll", async (HttpContext httpContext, string? driverType) =>
 {
-using var scanningContext = new ScanningContext(new GdiImageContext());
+    using var scanningContext = new ScanningContext(new GdiImageContext());
     scanningContext.SetUpWin32Worker();
     var controller = new ScanController(scanningContext);
 
@@ -168,11 +170,11 @@ using var scanningContext = new ScanningContext(new GdiImageContext());
     if (string.IsNullOrEmpty(driverType))
     {
         var groupedDeviceList = new Dictionary<string, IEnumerable<object>>();
-foreach (var pair in allDriverTypes)
-{
-    var devices = await pair.Value();
-    groupedDeviceList[pair.Key] = devices.Select(device => new { device.Name, device.ID } as object).ToList();
-}
+        foreach (var pair in allDriverTypes)
+        {
+            var devices = await pair.Value();
+            groupedDeviceList[pair.Key] = devices.Select(device => new { device.Name, device.ID } as object).ToList();
+        }
 
         return Results.Ok(groupedDeviceList);
     }
